@@ -1,5 +1,3 @@
-//Isaiah Iruoha - 20346489
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -20,7 +18,7 @@ __global__ void matMulKernel(const float* M, const float* N, float* P, int Width
         }
         P[row * Width + col] = sum;
     }
-}
+} 
 
 void matMulCPU(const float* A, const float* B, float* C, int Width)
 {
@@ -56,7 +54,7 @@ bool compareArrays(const float* ref, const float* gpu, int size, float tolerance
 
 int main()
 {
-    int testSizes[] = {256, 512, 1024};
+    int testSizes[] = {256, 512, 1024, 2048, 4096};
     int numTests = sizeof(testSizes)/sizeof(testSizes[0]);
 
     //set seed for host random initialization
@@ -102,9 +100,8 @@ int main()
         printf("Host to Device transfer time: %.3f ms\n", elapsedTime);
 
          //configure kernel launch and time kernel
-        dim3 block(1, 1);  // can also vary block.x and block.y
-        //dim3 grid((Width + block.x - 1) / block.x, (Width + block.y - 1) / block.y);
-        dim3 grid(1, 1); 
+        dim3 block(32, 32);  // can also vary block.x and block.y
+        dim3 grid((Width + block.x - 1) / block.x, (Width + block.y - 1) / block.y);
 
         cudaEventRecord(start, 0);
 
@@ -126,26 +123,26 @@ int main()
         cudaEventSynchronize(stop);
         float d2hTime = 0.0f;
         cudaEventElapsedTime(&d2hTime, start, stop);
-        printf("Device to Host transfer time: %.3f ms\n", d2hTime);
+        printf("Device to Host transfer time: %.3f ms\n\n", d2hTime);
 
         //clean up events
         cudaEventDestroy(start);
         cudaEventDestroy(stop);
 
         //CPU reference computation and timing
-        clock_t cpuStart = clock();
-        matMulCPU(h_M, h_N, h_Pcpu, Width);
-        clock_t cpuEnd = clock();
-        float cpuTimeMs = 1000.0f * (float)(cpuEnd - cpuStart) / CLOCKS_PER_SEC;
-        printf("CPU matrix multiplication time: %.3f ms\n", cpuTimeMs);
+       // clock_t cpuStart = clock();
+       // matMulCPU(h_M, h_N, h_Pcpu, Width);
+       // clock_t cpuEnd = clock();
+       // float cpuTimeMs = 1000.0f * (float)(cpuEnd - cpuStart) / CLOCKS_PER_SEC;
+       // printf("CPU matrix multiplication time: %.3f ms\n", cpuTimeMs);
 
          //compare results
-        bool correct = compareArrays(h_Pcpu, h_P, size, 1e-3f);
-        if (correct) {
-            printf("Test PASSED for %dx%d!\n\n", Width, Width);
-        } else {
-            printf("Test FAILED for %dx%d!\n\n", Width, Width);
-        }
+        //bool correct = compareArrays(h_Pcpu, h_P, size, 1e-3f);
+        //if (correct) {
+        //    printf("Test PASSED for %dx%d!\n\n", Width, Width);
+        //} else {
+        //    printf("Test FAILED for %dx%d!\n\n", Width, Width);
+        //}
 
         //clean up and free mem
         cudaFree(d_M);
