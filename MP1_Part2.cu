@@ -102,8 +102,9 @@ int main()
         printf("Host to Device transfer time: %.3f ms\n", elapsedTime);
 
          //configure kernel launch and time kernel
-        dim3 block(16, 16);  // can also vary block.x and block.y
-        dim3 grid((Width + block.x - 1) / block.x, (Width + block.y - 1) / block.y);
+        dim3 block(1, 1);  // can also vary block.x and block.y
+        //dim3 grid((Width + block.x - 1) / block.x, (Width + block.y - 1) / block.y);
+        dim3 grid(1, 1); 
 
         cudaEventRecord(start, 0);
 
@@ -141,9 +142,9 @@ int main()
          //compare results
         bool correct = compareArrays(h_Pcpu, h_P, size, 1e-3f);
         if (correct) {
-            printf("Test PASSED for %dx%d!\n", Width, Width);
+            printf("Test PASSED for %dx%d!\n\n", Width, Width);
         } else {
-            printf("Test FAILED for %dx%d!\n", Width, Width);
+            printf("Test FAILED for %dx%d!\n\n", Width, Width);
         }
 
         //clean up and free mem
