@@ -10,7 +10,7 @@ __global__ void matMulKernel(const float* M, const float* N, float* P, int Width
 {
     //calculate the row index of the P element
     int row = blockIdx.y * blockDim.y + threadIdx.y;
-    // Calculate the column index of the P element
+    //calculate the column index of the P element
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (row < Width && col < Width) {
@@ -74,11 +74,11 @@ int main()
         float* h_P    = (float*)malloc(bytes); //host result from GPU
         float* h_Pcpu = (float*)malloc(bytes); //host result from CPU
 
-        //Initialize Host Memory
+        //initialize Host Memory
         randomInit(h_M, size);
         randomInit(h_N, size);
 
-        //Allocate Device Memory
+        //allocate Device Memory
         float *d_M, *d_N, *d_P;
         cudaMalloc((void**)&d_M, bytes);
         cudaMalloc((void**)&d_N, bytes);
@@ -102,7 +102,7 @@ int main()
         printf("Host to Device transfer time: %.3f ms\n", elapsedTime);
 
          //configure kernel launch and time kernel
-        dim3 block(32, 32);  // can also vary block.x and block.y
+        dim3 block(32, 32); 
         dim3 grid((Width + block.x - 1) / block.x, (Width + block.y - 1) / block.y);
 
         cudaEventRecord(start, 0);
