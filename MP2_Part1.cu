@@ -5,8 +5,8 @@
 #include <cuda_runtime.h>
 #include <time.h>
 
-#define TOLERANCE 0.001f
-#define TILE_WIDTH 16  // change this value manually for different tile sizes
+#define TOLERANCE 0.001f         // tolerance for result comparison
+#define TILE_WIDTH 16            // change this value manually for different tile sizes
 
 // cpu reference for square matrix multiplication
 void matMulCPU(const float* A, const float* B, float* C, int Width)
@@ -22,7 +22,7 @@ void matMulCPU(const float* A, const float* B, float* C, int Width)
     }
 }
 
-// init matrix with random floats [0,1]
+// init matrix with random floats between 0 and 1
 void randomInit(float* data, int size)
 {
     for (int i = 0; i < size; i++) {
@@ -42,36 +42,36 @@ bool compareArrays(const float* ref, const float* gpu, int size, float tolerance
     return true;
 }
 
-// tiled matrix multiplication kernel using shared memory, templated by tile width
-template <int TILE_WIDTH>
-__global__ void tiledMatMulKernel(const float* M, const float* N, float* P, int Width)
+// tiled matrix multiplication kernel using dynamic shared memory
+// tileWidth is passed as a kernel parameter so that the shared memory size is computed at runtime
+__global__ void tiledMatMulKernel(const float* M, const float* N, float* P, int Width, int tileWidth)
 {
-    __shared__ float tileM[TILE_WIDTH][TILE_WIDTH];  // shared tile for m
-    __shared__ float tileN[TILE_WIDTH][TILE_WIDTH];  // shared tile for n
+    extern __shared__ float shared[];  // shared memory for both tiles
+    float* tileM = shared;              // first tileWidth*tileWidth floats for M
+    float* tileN = shared + tileWidth * tileWidth;  // next tileWidth*tileWidth floats for N
 
-    int row = blockIdx.y * TILE_WIDTH + threadIdx.y;  // row index in p
-    int col = blockIdx.x * TILE_WIDTH + threadIdx.x;  // col index in p
-
+    int row = blockIdx.y * tileWidth + threadIdx.y;  // row index in P
+    int col = blockIdx.x * tileWidth + threadIdx.x;  // col index in P
     float Pvalue = 0.0f;
-    int numTiles = (Width + TILE_WIDTH - 1) / TILE_WIDTH;  // number of tiles in k dim
+    int numTiles = (Width + tileWidth - 1) / tileWidth;  // number of phases in k-dim
 
     for (int ph = 0; ph < numTiles; ph++) {
-        int tiledCol = ph * TILE_WIDTH + threadIdx.x;  // index for m tile
+        int tiledCol = ph * tileWidth + threadIdx.x;  // index for current tile in M
         if (row < Width && tiledCol < Width)
-            tileM[threadIdx.y][threadIdx.x] = M[row * Width + tiledCol];
+            tileM[threadIdx.y * tileWidth + threadIdx.x] = M[row * Width + tiledCol];
         else
-            tileM[threadIdx.y][threadIdx.x] = 0.0f;
+            tileM[threadIdx.y * tileWidth + threadIdx.x] = 0.0f;
 
-        int tiledRow = ph * TILE_WIDTH + threadIdx.y;  // index for n tile
+        int tiledRow = ph * tileWidth + threadIdx.y;  // index for current tile in N
         if (tiledRow < Width && col < Width)
-            tileN[threadIdx.y][threadIdx.x] = N[tiledRow * Width + col];
+            tileN[threadIdx.y * tileWidth + threadIdx.x] = N[tiledRow * Width + col];
         else
-            tileN[threadIdx.y][threadIdx.x] = 0.0f;
+            tileN[threadIdx.y * tileWidth + threadIdx.x] = 0.0f;
 
         __syncthreads();
 
-        for (int k = 0; k < TILE_WIDTH; k++) {
-            Pvalue += tileM[threadIdx.y][k] * tileN[k][threadIdx.x];
+        for (int k = 0; k < tileWidth; k++) {
+            Pvalue += tileM[threadIdx.y * tileWidth + k] * tileN[k * tileWidth + threadIdx.x];
         }
         __syncthreads();
     }
@@ -84,7 +84,6 @@ int main()
 {
     int testSizes[] = {256, 512, 1024, 2048, 4096};  // matrix sizes to test
     int numTests = sizeof(testSizes) / sizeof(testSizes[0]);
-
     srand((unsigned int)time(NULL));
 
     for (int t = 0; t < numTests; t++) {
@@ -93,10 +92,10 @@ int main()
         size_t bytes = size * sizeof(float);
         printf("tiled matrix multiplication test: %d x %d\n", Width, Width);
 
-        float* h_M = (float*)malloc(bytes);  // host m
-        float* h_N = (float*)malloc(bytes);  // host n
-        float* h_P = (float*)malloc(bytes);  // host p (gpu result)
-        float* h_Pcpu = (float*)malloc(bytes);  // host p (cpu ref)
+        float* h_M = (float*)malloc(bytes);  // host input matrix M
+        float* h_N = (float*)malloc(bytes);  // host input matrix N
+        float* h_P = (float*)malloc(bytes);  // host result from gpu
+        float* h_Pcpu = (float*)malloc(bytes);  // host result from cpu
 
         randomInit(h_M, size);
         randomInit(h_N, size);
@@ -111,7 +110,7 @@ int main()
         cudaEventCreate(&start);
         cudaEventCreate(&stop);
 
-        // host to device transfer
+        // time host to device transfer
         cudaEventRecord(start, 0);
         cudaMemcpy(d_M, h_M, bytes, cudaMemcpyHostToDevice);
         cudaMemcpy(d_N, h_N, bytes, cudaMemcpyHostToDevice);
@@ -120,12 +119,13 @@ int main()
         cudaEventElapsedTime(&elapsedTime, start, stop);
         printf("host to device transfer time: %.3f ms\n", elapsedTime);
 
-        // set block and grid dimensions based on global TILE_WIDTH
         dim3 block(TILE_WIDTH, TILE_WIDTH);
         dim3 grid((Width + TILE_WIDTH - 1) / TILE_WIDTH, (Width + TILE_WIDTH - 1) / TILE_WIDTH);
+        int sharedSize = 2 * TILE_WIDTH * TILE_WIDTH * sizeof(float); // shared memory for two tiles
 
         cudaEventRecord(start, 0);
-        tiledMatMulKernel<TILE_WIDTH><<<grid, block>>>(d_M, d_N, d_P, Width);
+        // launch kernel with dynamic shared memory and pass tile width as parameter
+        tiledMatMulKernel<<<grid, block, sharedSize>>>(d_M, d_N, d_P, Width, TILE_WIDTH);
         cudaEventRecord(stop, 0);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&elapsedTime, start, stop);
@@ -143,13 +143,11 @@ int main()
 
         // compare results
         bool correct = compareArrays(h_Pcpu, h_P, size, 1e-3f);
-        if (correct) {
+        if (correct)
             printf("test PASSED for %dx%d!\n\n", Width, Width);
-        } else {
+        else
             printf("test FAILED for %dx%d!\n\n", Width, Width);
-        }
 
-        // device to host transfer timing (for completeness)
         cudaEventRecord(start, 0);
         cudaMemcpy(h_P, d_P, bytes, cudaMemcpyDeviceToHost);
         cudaEventRecord(stop, 0);
