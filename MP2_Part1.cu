@@ -1,5 +1,3 @@
-// Isaiah Iruoha 20346489
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -41,35 +39,35 @@ bool compareArrays(const float* ref, const float* gpu, int size, float tolerance
     return true;
 }
 
-// tiled matrix multiplication kernel using dynamic shared memory
-__global__ void tiledMatMulKernel(const float* M, const float* N, float* P, int Width, int tileWidth)
+// tiled matrix multiplication kernel using static shared memory
+__global__ void tiledMatMulKernel_static(const float* M, const float* N, float* P, int Width)
 {
-    extern __shared__ float shared[];  // shared memory for both tiles
-    float* tileM = shared;              // first tileWidth*tileWidth floats for M
-    float* tileN = shared + tileWidth * tileWidth;  // next tileWidth*tileWidth floats for N
+    __shared__ float tileM[TILE_WIDTH][TILE_WIDTH];  // static shared memory for M
+    __shared__ float tileN[TILE_WIDTH][TILE_WIDTH];  // static shared memory for N
 
-    int row = blockIdx.y * tileWidth + threadIdx.y;
-    int col = blockIdx.x * tileWidth + threadIdx.x;
+    int row = blockIdx.y * TILE_WIDTH + threadIdx.y;  // row index in P
+    int col = blockIdx.x * TILE_WIDTH + threadIdx.x;  // col index in P
+
     float Pvalue = 0.0f;
-    int numTiles = (Width + tileWidth - 1) / tileWidth;
+    int numTiles = (Width + TILE_WIDTH - 1) / TILE_WIDTH;
 
     for (int ph = 0; ph < numTiles; ph++) {
-        int tiledCol = ph * tileWidth + threadIdx.x;
+        int tiledCol = ph * TILE_WIDTH + threadIdx.x;  // index for current tile in M
         if (row < Width && tiledCol < Width)
-            tileM[threadIdx.y * tileWidth + threadIdx.x] = M[row * Width + tiledCol];
+            tileM[threadIdx.y][threadIdx.x] = M[row * Width + tiledCol];
         else
-            tileM[threadIdx.y * tileWidth + threadIdx.x] = 0.0f;
+            tileM[threadIdx.y][threadIdx.x] = 0.0f;
 
-        int tiledRow = ph * tileWidth + threadIdx.y;
+        int tiledRow = ph * TILE_WIDTH + threadIdx.y;  // index for current tile in N
         if (tiledRow < Width && col < Width)
-            tileN[threadIdx.y * tileWidth + threadIdx.x] = N[tiledRow * Width + col];
+            tileN[threadIdx.y][threadIdx.x] = N[tiledRow * Width + col];
         else
-            tileN[threadIdx.y * tileWidth + threadIdx.x] = 0.0f;
+            tileN[threadIdx.y][threadIdx.x] = 0.0f;
 
         __syncthreads();
 
-        for (int k = 0; k < tileWidth; k++) {
-            Pvalue += tileM[threadIdx.y * tileWidth + k] * tileN[k * tileWidth + threadIdx.x];
+        for (int k = 0; k < TILE_WIDTH; k++) {
+            Pvalue += tileM[threadIdx.y][k] * tileN[k][threadIdx.x];
         }
         __syncthreads();
     }
@@ -107,10 +105,9 @@ int main()
         cudaMemcpy(d_M, h_M, bytes, cudaMemcpyHostToDevice);
         cudaMemcpy(d_N, h_N, bytes, cudaMemcpyHostToDevice);
 
-        // set up grid and block dims
+        // set up grid and block dimensions
         dim3 block(TILE_WIDTH, TILE_WIDTH);
         dim3 grid((Width + TILE_WIDTH - 1) / TILE_WIDTH, (Width + TILE_WIDTH - 1) / TILE_WIDTH);
-        int sharedSize = 2 * TILE_WIDTH * TILE_WIDTH * sizeof(float);
 
         cudaEvent_t start, stop;
         float kernelTime = 0.0f;
@@ -119,7 +116,7 @@ int main()
 
         // measure kernel execution time
         cudaEventRecord(start, 0);
-        tiledMatMulKernel<<<grid, block, sharedSize>>>(d_M, d_N, d_P, Width, TILE_WIDTH);
+        tiledMatMulKernel_static<<<grid, block>>>(d_M, d_N, d_P, Width);
         cudaEventRecord(stop, 0);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&kernelTime, start, stop);
